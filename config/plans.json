@@ -1,0 +1,140 @@
+{
+  "plans": [
+    {
+      "id": "free",
+      "name": "Free",
+      "description": "Perfect for testing and small worlds",
+      "badge": null,
+      "highlight": false,
+      "priceMonthly": 0,
+      "resources": {
+        "memoryMb": 2048,
+        "diskMb": 10240,
+        "cpuPercent": 100,
+        "backups": 2,
+        "databases": 0
+      }
+    },
+    {
+      "id": "starter",
+      "name": "Starter",
+      "description": "Small survival or creative server",
+      "badge": null,
+      "highlight": false,
+      "priceMonthly": 4,
+      "resources": {
+        "memoryMb": 4096,
+        "diskMb": 20480,
+        "cpuPercent": 200,
+        "backups": 5,
+        "databases": 1
+      }
+    },
+    {
+      "id": "pro",
+      "name": "Pro",
+      "description": "Busy communities and modpacks",
+      "badge": "Popular",
+      "highlight": true,
+      "priceMonthly": 8,
+      "resources": {
+        "memoryMb": 8192,
+        "diskMb": 40960,
+        "cpuPercent": 400,
+        "backups": 10,
+        "databases": 3
+      }
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "description": "High-performance networks",
+      "badge": null,
+      "highlight": false,
+      "priceMonthly": 16,
+      "resources": {
+        "memoryMb": 16384,
+        "diskMb": 81920,
+        "cpuPercent": 800,
+        "backups": 20,
+        "databases": 5
+      }
+    }
+  ],
+  "nodeTiers": [
+    {
+      "id": "budget",
+      "name": "Budget",
+      "description": "Shared infrastructure on reliable hardware. Great for most servers.",
+      "ramPerGbMonthly": 1.00
+    },
+    {
+      "id": "premium",
+      "name": "Premium",
+      "description": "Dedicated resources with NVMe storage and lower latency.",
+      "badge": "Best Performance",
+      "ramPerGbMonthly": 1.75
+    }
+  ],
+  "addons": [
+    {
+      "id": "always_on",
+      "name": "24/7 Uptime",
+      "description": "Your server stays running even when no players are online. Prevents auto-sleep and keeps the world always accessible.",
+      "featured": true,
+      "priceMonthly": 3
+    },
+    {
+      "id": "dedicated_ip",
+      "name": "Dedicated IP",
+      "description": "A dedicated IPv4 address exclusively for your server instead of a shared node address.",
+      "featured": false,
+      "priceMonthly": 2
+    },
+    {
+      "id": "priority_startup",
+      "name": "Priority Startup",
+      "description": "Your server jumps to the front of the startup queue on the node.",
+      "featured": false,
+      "priceMonthly": 1
+    },
+    {
+      "id": "auto_restart",
+      "name": "Auto-Restart",
+      "description": "Automatically restarts your server within 30 seconds of an unexpected crash.",
+      "featured": false,
+      "priceMonthly": 1
+    },
+    {
+      "id": "extra_backups",
+      "name": "Extra Backups",
+      "description": "5 additional scheduled backup slots on top of your plan's allocation.",
+      "featured": false,
+      "priceMonthly": 1
+    }
+  ],
+  "custom": {
+    "enabled": true,
+    "pricing": {
+      "cpuPerCoreMonthly": 1.00,
+      "diskPerGbMonthly": 0.10,
+      "backupPerSlotMonthly": 0.25,
+      "databasePerInstanceMonthly": 1.00
+    },
+    "limits": {
+      "memoryMbMin": 1024,
+      "memoryMbMax": 32768,
+      "memoryMbStep": 512,
+      "diskMbMin": 10240,
+      "diskMbMax": 204800,
+      "diskMbStep": 5120,
+      "cpuPercentMin": 50,
+      "cpuPercentMax": 800,
+      "cpuPercentStep": 50,
+      "backupsMin": 0,
+      "backupsMax": 20,
+      "databasesMin": 0,
+      "databasesMax": 10
+    }
+  }
+}

@@ -1,0 +1,38 @@
+version: "3.9"
+
+# Local dev only — runs Postgres + Redis so Next.js can use them from the host.
+# Start with: docker compose -f docker-compose.dev.yml up -d
+# Or just run: npm run dev:local  (handles everything automatically)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: hobby
+      POSTGRES_PASSWORD: hobby
+      POSTGRES_DB: hobby_panel
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hobby -d hobby_panel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_dev_data:

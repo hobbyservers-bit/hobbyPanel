@@ -1,0 +1,449 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth (Lucia v3 required shape) ────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  emailVerified           Boolean   @default(false)
+  emailVerifyToken        String?   @unique
+  emailVerifyExpiry       DateTime?
+  emailTwoFactorEnabled   Boolean   @default(false)
+  emailTwoFactorCode      String?   // SHA-256 hash of current login/setup code
+  emailTwoFactorExpiry    DateTime?
+  totpSecret              String?   // active TOTP secret (null = 2FA not set up)
+  pendingTotpSecret    String?   // temp secret during setup, cleared after confirmation
+  twoFactorEnabled     Boolean   @default(false)
+  backupCodes          String[]  // SHA-256 hashes of single-use backup codes
+  passwordResetToken   String?   @unique
+  passwordResetExpiry  DateTime?
+  role                 Role      @default(USER)
+  plan         Plan     @default(FREE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  credits     Int      @default(0)
+  themeData   Json     @default("{}")
+
+  sessions         Session[]
+  servers          Server[]
+  serverUsers      ServerUser[]
+  apiKeys          ApiKey[]
+  auditLogs        AuditLog[]
+  creditTxns       CreditTransaction[]
+  affiliateCode    AffiliateCode?
+  referredBy       AffiliateReferral?  @relation("UserReferredBy")
+  promoRedemptions PromoRedemption[]
+
+  @@index([email])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(references: [id], fields: [userId], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Infrastructure ─────────────────────────────────────────────────────────
+
+model Location {
+  id          String   @id @default(cuid())
+  name        String   @unique // slug: "us.east.1", "nyc.eastern"
+  displayName String           // "US East 1", "NYC Eastern"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  nodes Node[]
+}
+
+model Node {
+  id          String  @id @default(cuid())
+  name        String
+  fqdn        String
+  port        Int     @default(8080)
+  tokenId         String  // Wings node token ID
+  tokenSecret     String  // Wings node token secret (store encrypted in prod)
+  tlsEnabled      Boolean @default(true)
+  maintenanceMode Boolean @default(false)
+  locationId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  location    Location?    @relation(fields: [locationId], references: [id])
+  servers     Server[]
+  allocations Allocation[]
+
+  @@index([fqdn])
+  @@index([locationId])
+}
+
+model Allocation {
+  id       String  @id @default(cuid())
+  nodeId   String
+  ip       String  @default("0.0.0.0") // bind IP; "0.0.0.0" means all interfaces
+  alias    String? // optional friendly label shown to users instead of the IP
+  port     Int
+  notes    String  @default("")
+  serverId String? // null = unassigned / free
+
+  node   Node    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  server Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  @@unique([nodeId, port])
+  @@index([nodeId])
+  @@index([serverId])
+}
+
+// ─── Eggs (Pterodactyl-compatible server type definitions) ───────────────────
+
+model Egg {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  author           String   @default("")
+  description      String   @default("")
+  features         String[] @default([])
+  dockerImage      String
+  dockerImages     Json     @default("{}") // map: "image" -> "display label"
+  startup          String   // startup command with {{VAR}} placeholders
+  configStop       String   @default("stop")
+  configStartup    String   @default("{}") // JSON: startup detection regex
+  configFiles      String   @default("{}") // JSON: files to generate/modify
+  installScript    String   @default("") // bash install script
+  installContainer String   @default("ghcr.io/pterodactyl/installers:alpine")
+  itzgType         String   @default("PAPER") // itzg/minecraft-server TYPE for mock mode
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  variables EggVariable[]
+  servers   Server[]
+}
+
+model EggVariable {
+  id           String  @id @default(cuid())
+  eggId        String
+  name         String
+  description  String  @default("")
+  envVariable  String  // e.g. "MC_VERSION"
+  defaultValue String  @default("")
+  userViewable Boolean @default(true)
+  userEditable Boolean @default(true)
+  rules        String  @default("") // e.g. "required|string|between:1,20"
+  sortOrder    Int     @default(0)
+
+  egg Egg @relation(fields: [eggId], references: [id], onDelete: Cascade)
+
+  @@unique([eggId, envVariable])
+  @@index([eggId])
+}
+
+// ─── Servers ─────────────────────────────────────────────────────────────────
+
+model Server {
+  id         String       @id @default(cuid())
+  name       String
+  userId     String
+  nodeId     String
+  eggId      String?
+  externalId String       @unique // Wings UUID for this server
+  status     ServerStatus @default(OFFLINE)
+
+  // Plan & resource limits
+  planId       String   @default("free")
+  nodeTier     String   @default("budget")
+  addons       String[] @default([])
+  memoryMb     Int      @default(1024)
+  diskMb       Int      @default(5120)
+  cpuLimit     Int      @default(100) // percentage (100 = 1 core)
+  maxBackups   Int      @default(2)
+  maxDatabases Int      @default(0)
+
+  // Minecraft config (derived from egg; kept for backward compat)
+  mcVersion      String  @default("latest")
+  jarType        String  @default("paper")
+  startupCommand String?
+  dockerImage    String?
+
+  // Egg variable overrides: { "MC_VERSION": "1.21.4", "ONLINE_MODE": "TRUE", ... }
+  environment Json    @default("{}")
+  suspended   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  node      Node         @relation(fields: [nodeId], references: [id])
+  egg       Egg?         @relation(fields: [eggId], references: [id])
+  subUsers       ServerUser[]
+  backups        Backup[]
+  auditLogs      AuditLog[]
+  scheduledTasks ScheduledTask[]
+  discordWebhook DiscordWebhook?
+  allocations    Allocation[]
+
+  @@index([userId])
+  @@index([nodeId])
+  @@index([eggId])
+  @@index([externalId])
+}
+
+enum ServerStatus {
+  OFFLINE
+  STARTING
+  ONLINE
+  STOPPING
+}
+
+// ─── Subusers ────────────────────────────────────────────────────────────────
+
+model ServerUser {
+  id       String @id @default(cuid())
+  userId   String
+  serverId String
+
+  canConsole  Boolean @default(false)
+  canFiles    Boolean @default(false)
+  canPower    Boolean @default(false)
+  canSettings Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serverId])
+  @@index([userId])
+  @@index([serverId])
+}
+
+// ─── Backups ─────────────────────────────────────────────────────────────────
+
+model Backup {
+  id         String       @id @default(cuid())
+  serverId   String
+  name       String
+  externalId String       @unique // Wings backup UUID
+  sizeMb     Int?
+  checksum   String?
+  status     BackupStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+enum BackupStatus {
+  PENDING
+  COMPLETE
+  FAILED
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String    @unique
+  permissions String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+// ─── Scheduled Tasks ─────────────────────────────────────────────────────────
+
+model ScheduledTask {
+  id        String    @id @default(cuid())
+  serverId  String
+  name      String
+  schedule  String    // cron expression e.g. "0 3 * * *"
+  action    String    // "command" | "restart" | "stop" | "start"
+  payload   String    @default("") // command text when action = "command"
+  enabled   Boolean   @default(true)
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+  createdAt DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+  @@index([enabled, nextRunAt])
+}
+
+// ─── Discord Webhooks ─────────────────────────────────────────────────────────
+
+model DiscordWebhook {
+  id            String   @id @default(cuid())
+  serverId      String   @unique
+  server        Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  webhookUrl    String
+  onStart       Boolean  @default(true)
+  onStop        Boolean  @default(true)
+  onCrash       Boolean  @default(true)
+  onHighRam     Boolean  @default(false)
+  ramThreshold  Int      @default(90)
+  onLowTps      Boolean  @default(false)
+  tpsThreshold  Float    @default(15.0)
+  onPlayerJoin  Boolean  @default(false)
+  watchedPlayer String?
+  embedConfigs  Json?    // Partial<Record<AlertEvent, { title, description, color }>>
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([serverId])
+}
+
+// ─── Panel Settings ───────────────────────────────────────────────────────────
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Credits ──────────────────────────────────────────────────────────────────
+
+model CreditTransaction {
+  id          String        @id @default(cuid())
+  userId      String
+  amount      Int           // positive = added, negative = deducted
+  type        CreditTxType
+  description String        @default("")
+  createdAt   DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum CreditTxType {
+  PURCHASE
+  ADMIN_GRANT
+  ADMIN_DEDUCT
+  BONUS
+  USAGE
+  REFUND
+  PROMO
+  AFFILIATE
+}
+
+// ─── Promo / Voucher Codes ────────────────────────────────────────────────────
+
+model PromoCode {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  description   String    @default("")
+  discountType  String    @default("PERCENT")  // "PERCENT" | "FIXED"
+  discountValue Int       @default(10)         // PERCENT: 1-100  |  FIXED: cents (500 = $5 off)
+  maxUses       Int?      // null = unlimited
+  usedCount     Int       @default(0)
+  expiresAt     DateTime?
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  redemptions PromoRedemption[]
+}
+
+model PromoRedemption {
+  id        String   @id @default(cuid())
+  userId    String
+  codeId    String
+  createdAt DateTime @default(now())
+
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code PromoCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeId])
+  @@index([userId])
+  @@index([codeId])
+}
+
+// ─── Affiliate Program ────────────────────────────────────────────────────────
+
+model AffiliateCode {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  code        String   @unique
+  active      Boolean  @default(true)
+  totalEarned Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrals AffiliateReferral[]
+}
+
+model AffiliateReferral {
+  id              String   @id @default(cuid())
+  affiliateCodeId String
+  referredUserId  String   @unique
+  createdAt       DateTime @default(now())
+
+  affiliateCode AffiliateCode    @relation(fields: [affiliateCodeId], references: [id], onDelete: Cascade)
+  referredUser  User             @relation("UserReferredBy", fields: [referredUserId], references: [id], onDelete: Cascade)
+  earnings      AffiliateEarning[]
+
+  @@index([affiliateCodeId])
+}
+
+model AffiliateEarning {
+  id         String   @id @default(cuid())
+  referralId String
+  amount     Int
+  rate       Float
+  createdAt  DateTime @default(now())
+
+  referral AffiliateReferral @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  @@index([referralId])
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  serverId  String?
+  action    String   // e.g. "server.delete", "backup.restore", "file.delete"
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  server Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([serverId])
+  @@index([createdAt])
+  @@index([action])
+}

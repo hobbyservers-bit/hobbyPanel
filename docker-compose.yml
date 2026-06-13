@@ -1,0 +1,70 @@
+version: "3.9"
+
+# Production stack. Managed by install.sh.
+# Do not run this directly in development — use docker-compose.dev.yml instead.
+
+services:
+  panel:
+    image: hobby-panel:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      AUTH_SECRET: ${AUTH_SECRET}
+      MOCK_WINGS: "false"
+      APP_URL: ${APP_URL}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    labels:
+      - "caddy=${DOMAIN}"
+      - "caddy.reverse_proxy={{upstreams 3000}}"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hobby}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-hobby_panel}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hobby}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.9
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - caddy_data:/data
+    depends_on:
+      - panel
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
